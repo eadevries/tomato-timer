@@ -1,0 +1,9 @@
+This app is intended to become a fully functional pomodor-style timer and 
+tracker. Currently implemented: the options to start immediately or on the press
+of the 's' key after running the program, as well as the ability to provide the
+number of minutes for the session.
+
+Hotkeys within the program are as follows:
+'p' - play / pause the timer from the pause / play states, respectively
+'s' - start the timer from the unstarted state
+'q' - exit the program
