@@ -1,8 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, Utc};
-use cursive::view::{Nameable, Resizable, SizeConstraint};
-//, value_parser, ArgAction, Command};
+use cursive::view::{Resizable, SizeConstraint};
 use cursive::views::{TextContent, TextView};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
