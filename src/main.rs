@@ -1,8 +1,12 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, Utc};
-use cursive::view::{Resizable, SizeConstraint};
-use cursive::views::{TextContent, TextView};
+use cursive::reexports::enumset::EnumSet;
+use cursive::{Rect, Vec2};
+use cursive::theme::{Color, ColorStyle, Style};
+use cursive::utils::span::SpannedString;
+use cursive::view::{Resizable, SizeConstraint, View};
+use cursive::views::{FixedLayout, Layer, OnLayoutView, TextContent, TextView};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 mod cli;
@@ -79,14 +83,48 @@ async fn main() {
 
     curses_app.load_toml(include_str!("theme.toml")).unwrap();
 
+    // Create styled text for the bottom info bar
+    let hot_key_style = Style {
+        effects: EnumSet::empty(),
+        color: ColorStyle::front(Color::Rgb(200, 50, 200)),
+    };
+    // TODO: consider using manually indexed spans instead and extracting to 
+    // a separate function.
+    let mut info_bar_text = SpannedString::new();
+    info_bar_text.append_plain(" (");
+    info_bar_text.append_styled("s", hot_key_style);
+    info_bar_text.append_plain(") start timer | (");
+    info_bar_text.append_styled("p", hot_key_style);
+    info_bar_text.append_plain(") pause toggle | (");
+    info_bar_text.append_styled("q", hot_key_style);
+    info_bar_text.append_plain(") quit");
+
+    // Create an info bar at the bottom of the app to display controls
+    curses_app.screen_mut().add_transparent_layer(
+        OnLayoutView::new(
+            FixedLayout::new().child(
+                Rect::from_point(Vec2::zero()),
+                Layer::new(TextView::new(info_bar_text))
+                    .full_width(),
+            ),
+            |layout, size| {
+                layout.set_child_position(
+                    0,
+                    Rect::from_size((0, size.y - 1), (size.x, 1)),
+                );
+                layout.layout(size);
+            },
+        ).full_screen(),
+    );
+
     // Create a separate TextContent and add it to a TextView so we can keep a
     // reference to it and update it without retrieving the TextView from the
     // cursive app by name.
     let timer_content = TextContent::new("00:00:00");
     curses_app.add_layer(TextView::new_with_content(timer_content.clone())
         .center()
-        .resized(SizeConstraint::Fixed(12), SizeConstraint::Fixed(3))
-    );
+        .resized(SizeConstraint::Fixed(12), SizeConstraint::Fixed(3)));
+
     curses_app.set_autorefresh(true);
 
     // Spawn the thread to recv the time updates and update the view.
