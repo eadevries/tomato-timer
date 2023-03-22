@@ -120,7 +120,8 @@ async fn main() {
     // Create a separate TextContent and add it to a TextView so we can keep a
     // reference to it and update it without retrieving the TextView from the
     // cursive app by name.
-    let timer_content = TextContent::new("00:00:00");
+    let (h, m, s) = duration_to_hms(&options.duration);
+    let timer_content = TextContent::new(format!("{:02}:{:02}:{:02}", h, m, s));
     curses_app.add_layer(TextView::new_with_content(timer_content.clone())
         .center()
         .resized(SizeConstraint::Fixed(12), SizeConstraint::Fixed(3)));
