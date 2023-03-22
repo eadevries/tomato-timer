@@ -222,7 +222,11 @@ async fn send_updates(send: Sender<(i64, i64, i64)>, timer_state: Arc<Mutex<Time
             }
 
             // Send the updated time remaining so that the TUI can be updated.
-            send.send((hours, minutes, seconds)).await.unwrap();
+            if let Err(_) = send.send((hours, minutes, seconds)).await {
+                // If unable to send, the receiver has closed and we are
+                // shutting down.
+                break;
+            }
 
             // If there is still time on the clock, sleep until the next 100ms
             // has elapsed.
