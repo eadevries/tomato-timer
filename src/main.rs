@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, Utc};
-use cursive::reexports::enumset::EnumSet;
 use cursive::{Rect, Vec2};
+use cursive::reexports::enumset::EnumSet;
 use cursive::theme::{Color, ColorStyle, Style};
 use cursive::utils::span::SpannedString;
 use cursive::view::{Resizable, SizeConstraint, View};
