@@ -205,9 +205,7 @@ async fn send_updates(send: Sender<(i64, i64, i64)>, timer_state: Arc<Mutex<Time
                 if let RunState::Running(rs) = &ts.run_state {
                     let remaining_duration = rs.expiration - Utc::now();
                     timer_finished = remaining_duration.num_seconds() <= 0;
-                    hours = remaining_duration.num_hours() % 100;
-                    minutes = remaining_duration.num_minutes() % 60;
-                    seconds = remaining_duration.num_seconds() % 60;
+                    (hours, minutes, seconds) = duration_to_hms(&remaining_duration);
                 } else {
                     // If we are not in the running state, do not send any
                     // updates and let the thread finish.
@@ -240,4 +238,10 @@ async fn recv_messages(mut receiver: Receiver<(i64, i64, i64)>, content: &TextCo
     }
 }
 
+fn duration_to_hms(dur: &Duration) -> (i64, i64, i64) {
+    let hours = dur.num_hours() % 100;
+    let minutes = dur.num_minutes() % 60;
+    let seconds = dur.num_seconds() % 60;
 
+    (hours, minutes, seconds)
+}
