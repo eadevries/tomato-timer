@@ -77,6 +77,8 @@ async fn main() {
     // Create the curses app which handles the TUI and watches for key inputs.
     let mut curses_app = cursive::default();
 
+    curses_app.load_toml(include_str!("theme.toml")).unwrap();
+
     // Create a separate TextContent and add it to a TextView so we can keep a
     // reference to it and update it without retrieving the TextView from the
     // cursive app by name.
