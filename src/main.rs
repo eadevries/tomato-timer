@@ -1,9 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, Utc};
-use cursive::{Rect, Vec2};
+use cursive::{Cursive, Rect, Vec2};
+use cursive::reexports::crossbeam_channel::Sender as CBSender;
 use cursive::reexports::enumset::EnumSet;
-use cursive::theme::{Color, ColorStyle, Style};
+use cursive::theme::{Color, ColorStyle, Style, PaletteColor};
 use cursive::utils::span::SpannedString;
 use cursive::view::{Resizable, SizeConstraint, View};
 use cursive::views::{FixedLayout, Layer, OnLayoutView, TextContent, TextView};
@@ -51,37 +52,11 @@ async fn main() {
         TimerState::new(options.duration)
     ));
 
-    // channel for sending messages to start / stop / pause / unpause the timer
-    let (starter_send, mut starter_recv) = channel::<()>(16);
-    // channel on which to send time updates
-    let (time_send, time_recv) = channel::<(i64, i64, i64)>(16);
-
-    // Clone the references to the time update channel and main state mutex and 
-    // pass them into a new thread which exists to wait for a signal from the
-    // synchronous cursive app to start up a thread to send regular time 
-    // updates and check for the session's ending.
-    let timer_state_clone = timer_state.clone();
-    let time_send_clone = time_send.clone();
-    tokio::spawn(async move {
-        while let Some(()) = starter_recv.recv().await {
-            send_updates(time_send_clone.clone(), timer_state_clone.clone()).await;             
-        }
-    });
-
-    // If the `start` flag was passed, immediately update the timer_state to
-    // running and send the message which will start up the time update thread.
-    if options.start {
-        let mut ts = timer_state.lock().unwrap();
-        let expiration = Utc::now() + options.duration;
-        (*ts).run_state = RunState::Running(RunningState { expiration, });
-
-        starter_send.send(()).await.unwrap();
-    }
-
     // Create the curses app which handles the TUI and watches for key inputs.
     let mut curses_app = cursive::default();
 
     curses_app.load_toml(include_str!("theme.toml")).unwrap();
+    let bg_color = curses_app.current_theme().clone().palette[PaletteColor::Background];
 
     // Create styled text for the bottom info bar
     let hot_key_style = Style {
@@ -128,9 +103,40 @@ async fn main() {
 
     curses_app.set_autorefresh(true);
 
-    // Spawn the thread to recv the time updates and update the view.
+    // Channel for sending messages to start / stop / pause / unpause the timer
+    let (starter_send, mut starter_recv) = channel::<()>(16);
+    // Channel on which to send time updates only
+    let (time_send, time_recv) = channel::<(i64, i64, i64)>(16);
+    // Channel to send callbacks to cursive (main thread) from other threads
+    let to_main_thread = curses_app.cb_sink().clone();
+
+    // Clone the references to the time update channel and main state mutex and 
+    // pass them into a new thread which exists to wait for a signal from the
+    // synchronous cursive app to start up a thread to send regular time 
+    // updates and check for the session's ending.
+    let timer_state_clone = timer_state.clone();
+    let time_send_clone = time_send.clone();
+    let to_main_thread_clone = to_main_thread.clone();
     tokio::spawn(async move {
-        recv_messages(time_recv, &timer_content).await;
+        while let Some(()) = starter_recv.recv().await {
+            send_updates(time_send_clone.clone(), timer_state_clone.clone(), &to_main_thread_clone).await;             
+        }
+    });
+
+    // If the `start` flag was passed, immediately update the timer_state to
+    // running and send the message which will start up the time update thread.
+    if options.start {
+        let mut ts = timer_state.lock().unwrap();
+        let expiration = Utc::now() + options.duration;
+        (*ts).run_state = RunState::Running(RunningState { expiration, });
+
+        starter_send.send(()).await.unwrap();
+    }
+
+    // Spawn the thread to recv the time updates and update the view.
+    let timer_content_clone = timer_content.clone();
+    tokio::spawn(async move {
+        recv_messages(time_recv, &timer_content_clone).await;
     });
 
     // Callbacks to handle user input
@@ -164,6 +170,22 @@ async fn main() {
     curses_app.add_global_callback('q', |s| { s.quit() });
 
     let timer_state_clone = timer_state.clone();
+    curses_app.add_global_callback('r', move |app| {
+        let mut ts = timer_state_clone.lock().unwrap();
+        if let RunState::Finished = ts.run_state {
+            (*ts).run_state = RunState::Unstarted;
+
+            let (h, m, s) = duration_to_hms(&options.duration);
+            timer_content.set_content(format!("{:02}:{:02}:{:02}", h, m, s));
+
+            // Set background color back to default
+            let mut theme = app.current_theme().clone();
+            theme.palette[PaletteColor::Background] = bg_color;
+            app.set_theme(theme);
+        }
+    });
+
+    let timer_state_clone = timer_state.clone();
     let starter_send_clone = starter_send.clone();
     curses_app.add_global_callback('s', move |_| { 
         {
@@ -184,13 +206,22 @@ async fn main() {
             starter_send_clone.send(()).await.unwrap();
         });
     });
+    
 
     // With the async threads spawned, we finish by running the synchronous
     // cursive app.
     curses_app.run();
 }
 
-async fn send_updates(send: Sender<(i64, i64, i64)>, timer_state: Arc<Mutex<TimerState>>) {
+async fn send_updates(
+    send: Sender<(i64, i64, i64)>,
+    timer_state: Arc<Mutex<TimerState>>,
+    to_main_thread: &CBSender<Box<dyn FnOnce(&mut Cursive) + Send + 'static>>,
+) {
+    // To move into spawned thread, we cannot directly use the parameter, as it
+    // will cannot outlast the function body.
+    let to_main_thread = to_main_thread.clone();
+
     tokio::spawn(async move {
         let mut hours;
         let mut minutes;
@@ -218,6 +249,11 @@ async fn send_updates(send: Sender<(i64, i64, i64)>, timer_state: Arc<Mutex<Time
                 if timer_finished {
                     (hours, minutes, seconds) = (0, 0, 0);
                     (*ts).run_state = RunState::Finished;
+                    to_main_thread.send(Box::new(|s| {
+                        let mut theme = s.current_theme().clone();
+                        theme.palette[PaletteColor::Background] = Color::Rgb(75, 0, 0);
+                        s.set_theme(theme);
+                    })).expect("to be able to send a callback to the main thread");
                 }
             }
 
