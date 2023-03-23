@@ -221,7 +221,7 @@ async fn send_updates(
     to_main_thread: &CBSender<Box<dyn FnOnce(&mut Cursive) + Send + 'static>>,
 ) {
     // To move into spawned thread, we cannot directly use the parameter, as it
-    // will cannot outlast the function body.
+    // will not outlast the function body.
     let to_main_thread = to_main_thread.clone();
 
     tokio::spawn(async move {
