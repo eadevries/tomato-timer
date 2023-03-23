@@ -10,6 +10,3 @@ chrono = { version = "0.4.24", features = ["default"] }
 clap = { version = "4.1.8", features = ["derive", "cargo"] }
 cursive = { version = "0.20.0", features = ["toml"] }
 tokio = { version = "1.26.0", features = ["full"] }
-
-[toolchain]
-channel = "stable"
