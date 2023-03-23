@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, Utc};
+use cursive::event::Key;
 use cursive::{Cursive, Rect, Vec2};
 use cursive::reexports::crossbeam_channel::Sender as CBSender;
 use cursive::reexports::enumset::EnumSet;
@@ -74,7 +75,9 @@ async fn main() {
     info_bar_text.append_styled("r", hot_key_style);
     info_bar_text.append_plain(") reset timer | (");
     info_bar_text.append_styled("q", hot_key_style);
-    info_bar_text.append_plain(") quit ");
+    info_bar_text.append_plain(") quit | (");
+    info_bar_text.append_styled("↑↓", hot_key_style);
+    info_bar_text.append_plain(") add / sub time");
 
     // Create an info bar at the bottom of the app to display controls
     curses_app.screen_mut().add_transparent_layer(
@@ -97,8 +100,7 @@ async fn main() {
     // Create a separate TextContent and add it to a TextView so we can keep a
     // reference to it and update it without retrieving the TextView from the
     // cursive app by name.
-    let (h, m, s) = duration_to_hms(&options.duration);
-    let timer_content = TextContent::new(format!("{:02}:{:02}:{:02}", h, m, s));
+    let timer_content = TextContent::new(duration_to_timer_string(&options.duration));
     curses_app.add_layer(TextView::new_with_content(timer_content.clone())
         .center()
         .resized(SizeConstraint::Fixed(12), SizeConstraint::Fixed(3)));
@@ -172,13 +174,13 @@ async fn main() {
     curses_app.add_global_callback('q', |s| { s.quit() });
 
     let timer_state_clone = timer_state.clone();
+    let timer_content_clone = timer_content.clone();
     curses_app.add_global_callback('r', move |app| {
         let mut ts = timer_state_clone.lock().unwrap();
         if let RunState::Finished = ts.run_state {
             (*ts).run_state = RunState::Unstarted;
 
-            let (h, m, s) = duration_to_hms(&options.duration);
-            timer_content.set_content(format!("{:02}:{:02}:{:02}", h, m, s));
+            timer_content_clone.set_content(duration_to_timer_string(&options.duration));
 
             // Set background color back to default
             let mut theme = app.current_theme().clone();
@@ -209,6 +211,73 @@ async fn main() {
         });
     });
     
+
+    // Set up closure to pass as a callback for the up and down arrow keys,
+    // used for incrementing and decrementing the session length or time
+    // remaining.
+    let timer_state_clone = timer_state.clone();
+    let timer_content_clone = timer_content.clone(); 
+    let to_main_thread_clone = to_main_thread.clone();
+    let add_sub_callback = move |k| {
+        let delta = if let Key::Up = k { 1 } else { -1 };
+        let mut ts = timer_state_clone.lock().unwrap();
+        match ts.run_state.clone() {
+            // If the session has finished, we do nothing. User must reset the
+            // timer.
+            RunState::Finished => return,
+            RunState::Paused(ps) => {
+                // In the Paused state, the arrows keys adjust the remaining
+                // time. The user can cause the session to finish by
+                // decrementing the time remaining below 0. In either case we
+                // also must update the timer content, as no update thread is
+                // running.
+                let dr = ps.duration_remaining + Duration::minutes(delta);
+                if dr <= Duration::zero() {
+                    (*ts).run_state = RunState::Finished;
+                    to_main_thread_clone.send(Box::new(|app| {
+                        set_alert_bg(app);
+                    })).expect("to be able to send a callback to the main thread");
+                    timer_content_clone.set_content(duration_to_timer_string(&Duration::zero()));
+                } else {
+                    (*ts).run_state = RunState::Paused(PausedState { 
+                        duration_remaining: dr,
+                    });
+                    timer_content_clone.set_content(duration_to_timer_string(&dr))
+                }
+            },
+            RunState::Unstarted => {
+                // In the Unstarted state, the arrow keys adjust the session 
+                // length; we do not allow the session length to be zero or
+                // negative. We also must update the timer_content.
+                let session_length = ts.session_length + Duration::minutes(delta);
+                if session_length <= Duration::zero() {
+                    return;
+                }
+                (*ts).session_length = session_length; 
+                timer_content_clone.set_content(duration_to_timer_string(&session_length));
+            },
+            RunState::Running(rs) => {
+                // In the running state, we allow the arrow keys to add or
+                // subtract a minute off of the ticking clock.
+                (*ts).run_state = RunState::Running(RunningState { 
+                    expiration: rs.expiration + Duration::minutes(delta)
+                    // We shouldn't need to check for putting the session into
+                    // negative time, as the update thread checks for this,
+                    // substitutes 0, finishes the session and manages the TUI
+                    // updates.
+                });
+            },
+        }
+    };
+    
+    let add_sub_callback_clone = add_sub_callback.clone();
+    curses_app.add_global_callback(Key::Up, move |_| {
+        add_sub_callback_clone(Key::Up);
+    });
+    let add_sub_callback_clone = add_sub_callback.clone();
+    curses_app.add_global_callback(Key::Down, move |_| {
+        add_sub_callback_clone(Key::Down);
+    });
 
     // With the async threads spawned, we finish by running the synchronous
     // cursive app.
@@ -251,10 +320,8 @@ async fn send_updates(
                 if timer_finished {
                     (hours, minutes, seconds) = (0, 0, 0);
                     (*ts).run_state = RunState::Finished;
-                    to_main_thread.send(Box::new(|s| {
-                        let mut theme = s.current_theme().clone();
-                        theme.palette[PaletteColor::Background] = Color::Rgb(75, 0, 0);
-                        s.set_theme(theme);
+                    to_main_thread.send(Box::new(|app| {
+                        set_alert_bg(app)
                     })).expect("to be able to send a callback to the main thread");
                 }
             }
@@ -277,7 +344,7 @@ async fn send_updates(
 
 async fn recv_messages(mut receiver: Receiver<(i64, i64, i64)>, content: &TextContent) {
     while let Some((hours, minutes, seconds)) = receiver.recv().await {
-        content.set_content(&format!("{:02}:{:02}:{:02}", hours, minutes, seconds));
+        content.set_content(&hms_to_timer_string(hours, minutes, seconds));
     }
 }
 
@@ -287,4 +354,19 @@ fn duration_to_hms(dur: &Duration) -> (i64, i64, i64) {
     let seconds = dur.num_seconds() % 60;
 
     (hours, minutes, seconds)
+}
+
+fn hms_to_timer_string(h: i64, m: i64, s:i64) -> String {
+    format!("{:02}:{:02}:{:02}", h, m, s)
+}
+
+fn duration_to_timer_string(dur: &Duration) -> String {
+    let (h, m, s) = duration_to_hms(dur);
+    hms_to_timer_string(h, m, s)
+}
+
+fn set_alert_bg(app: &mut Cursive) {
+    let mut theme = app.current_theme().clone();
+    theme.palette[PaletteColor::Background] = Color::Rgb(75, 0, 0);
+    app.set_theme(theme);
 }
