@@ -71,8 +71,10 @@ async fn main() {
     info_bar_text.append_plain(") start timer | (");
     info_bar_text.append_styled("p", hot_key_style);
     info_bar_text.append_plain(") pause toggle | (");
+    info_bar_text.append_styled("r", hot_key_style);
+    info_bar_text.append_plain(") reset timer | (");
     info_bar_text.append_styled("q", hot_key_style);
-    info_bar_text.append_plain(") quit");
+    info_bar_text.append_plain(") quit ");
 
     // Create an info bar at the bottom of the app to display controls
     curses_app.screen_mut().add_transparent_layer(
