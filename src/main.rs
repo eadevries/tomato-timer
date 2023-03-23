@@ -51,7 +51,7 @@ async fn main() {
         TimerState::new(options.duration)
     ));
 
-    // channel for sending messages to start / stop / pause / unpase the timer
+    // channel for sending messages to start / stop / pause / unpause the timer
     let (starter_send, mut starter_recv) = channel::<()>(16);
     // channel on which to send time updates
     let (time_send, time_recv) = channel::<(i64, i64, i64)>(16);
