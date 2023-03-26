@@ -4,12 +4,11 @@ use chrono::{DateTime, Duration, Utc};
 use cursive::event::Key;
 use cursive::{Cursive, Rect, Vec2};
 use cursive::reexports::crossbeam_channel::Sender as CBSender;
-use cursive::reexports::enumset::EnumSet;
-use cursive::theme::{Color, ColorStyle, Style, PaletteColor};
-use cursive::utils::span::SpannedString;
+use cursive::theme::{Color, PaletteColor};
 use cursive::view::{Resizable, SizeConstraint, View};
 use cursive::views::{FixedLayout, Layer, OnLayoutView, TextContent, TextView};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+
 use tui::InfoBarItem;
 
 mod cli;
