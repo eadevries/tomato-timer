@@ -10,8 +10,10 @@ use cursive::utils::span::SpannedString;
 use cursive::view::{Resizable, SizeConstraint, View};
 use cursive::views::{FixedLayout, Layer, OnLayoutView, TextContent, TextView};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tui::InfoBarItem;
 
 mod cli;
+mod tui;
 
 #[derive(Debug, Clone)]
 enum RunState {
@@ -59,25 +61,15 @@ async fn main() {
     curses_app.load_toml(include_str!("theme.toml")).unwrap();
     let bg_color = curses_app.current_theme().clone().palette[PaletteColor::Background];
 
-    // Create styled text for the bottom info bar
-    let hot_key_style = Style {
-        effects: EnumSet::empty(),
-        color: ColorStyle::front(Color::Rgb(200, 50, 200)),
-    };
-    // TODO: consider using manually indexed spans instead and extracting to 
-    // a separate function.
-    let mut info_bar_text = SpannedString::new();
-    info_bar_text.append_plain(" (");
-    info_bar_text.append_styled("s", hot_key_style);
-    info_bar_text.append_plain(") start timer | (");
-    info_bar_text.append_styled("p", hot_key_style);
-    info_bar_text.append_plain(") pause toggle | (");
-    info_bar_text.append_styled("r", hot_key_style);
-    info_bar_text.append_plain(") reset timer | (");
-    info_bar_text.append_styled("q", hot_key_style);
-    info_bar_text.append_plain(") quit | (");
-    info_bar_text.append_styled("↑↓", hot_key_style);
-    info_bar_text.append_plain(") add / sub time");
+    // Create info bar content
+    let info_bar_items = vec![
+        InfoBarItem::new("s", "start timer"),
+        InfoBarItem::new("p", "pause toggle"),
+        InfoBarItem::new("r", "reset timer"),
+        InfoBarItem::new("q", "quit"),
+        InfoBarItem::new("↑↓", "add / sub time"),
+    ];
+    let info_bar_text = tui::info_bar_text(&info_bar_items);
 
     // Create an info bar at the bottom of the app to display controls
     curses_app.screen_mut().add_transparent_layer(
