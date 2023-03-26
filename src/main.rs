@@ -172,7 +172,7 @@ async fn main() {
         if let RunState::Finished = ts.run_state {
             (*ts).run_state = RunState::Unstarted;
 
-            timer_content_clone.set_content(duration_to_timer_string(&options.duration));
+            timer_content_clone.set_content(duration_to_timer_string(&ts.session_length));
 
             // Set background color back to default
             let mut theme = app.current_theme().clone();
@@ -189,7 +189,7 @@ async fn main() {
             let new_run_state = match &ts.run_state {
                 RunState::Unstarted => {
                     RunState::Running(RunningState {
-                        expiration: Utc::now() + options.duration,
+                        expiration: Utc::now() + ts.session_length,
                     })
                 },
                 _ => ts.run_state.clone(),
