@@ -83,9 +83,12 @@ async fn main() {
     // If the `start` flag was passed, immediately update the timer_state to
     // running and send the message which will start up the time update thread.
     if options.start {
-        let mut ts = timer_state.lock().unwrap();
-        let expiration = Utc::now() + options.duration;
-        ts.run_state = RunState::Running(RunningState { expiration, });
+        { // Additional scope created to ensure std mutex is dropped before
+          // the await call.
+            let mut ts = timer_state.lock().unwrap();
+            let expiration = Utc::now() + options.duration;
+            ts.run_state = RunState::Running(RunningState { expiration, });
+        }
 
         starter_send.send(()).await.unwrap();
     }
