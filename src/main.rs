@@ -73,11 +73,10 @@ async fn main() {
     // synchronous cursive app to start up a thread to send regular time 
     // updates and check for the session's ending.
     let timer_state_clone = timer_state.clone();
-    let time_send_clone = time_send.clone();
     let to_main_thread_clone = to_main_thread.clone();
     tokio::spawn(async move {
         while let Some(()) = starter_recv.recv().await {
-            send_updates(time_send_clone.clone(), timer_state_clone.clone(), &to_main_thread_clone).await;             
+            send_updates(time_send.clone(), timer_state_clone.clone(), &to_main_thread_clone).await;             
         }
     });
 
@@ -171,8 +170,6 @@ async fn main() {
     // used for incrementing and decrementing the session length or time
     // remaining.
     let timer_state_clone = timer_state.clone();
-    let timer_content_clone = timer_content.clone(); 
-    let to_main_thread_clone = to_main_thread.clone();
     let add_sub_callback = move |k| {
         let delta = if let Key::Up = k { 1 } else { -1 };
         let mut ts = timer_state_clone.lock().unwrap();
@@ -189,15 +186,15 @@ async fn main() {
                 let dr = ps.duration_remaining + Duration::minutes(delta);
                 if dr <= Duration::zero() {
                     (*ts).run_state = RunState::Finished;
-                    to_main_thread_clone.send(Box::new(|app| {
+                    to_main_thread.send(Box::new(|app| {
                         set_alert_bg(app);
                     })).expect("to be able to send a callback to the main thread");
-                    timer_content_clone.set_content(duration_to_timer_string(&Duration::zero()));
+                    timer_content.set_content(duration_to_timer_string(&Duration::zero()));
                 } else {
                     (*ts).run_state = RunState::Paused(PausedState { 
                         duration_remaining: dr,
                     });
-                    timer_content_clone.set_content(duration_to_timer_string(&dr))
+                    timer_content.set_content(duration_to_timer_string(&dr))
                 }
             },
             RunState::Unstarted => {
@@ -209,7 +206,7 @@ async fn main() {
                     return;
                 }
                 (*ts).session_length = session_length; 
-                timer_content_clone.set_content(duration_to_timer_string(&session_length));
+                timer_content.set_content(duration_to_timer_string(&session_length));
             },
             RunState::Running(rs) => {
                 // In the running state, we allow the arrow keys to add or
