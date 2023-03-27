@@ -2,17 +2,19 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, Utc};
 use cursive::event::Key;
-use cursive::{Cursive, Rect, Vec2};
+use cursive::Cursive;
 use cursive::reexports::crossbeam_channel::Sender as CBSender;
 use cursive::theme::{Color, PaletteColor};
-use cursive::view::{Resizable, SizeConstraint, View};
-use cursive::views::{FixedLayout, Layer, OnLayoutView, TextContent, TextView};
+use cursive::views::TextContent;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use tui::InfoBarItem;
+use tui::init_curses_app;
+use util::{duration_to_hms, duration_to_timer_string, hms_to_timer_string};
 
 mod cli;
 mod tui;
+mod util;
+
 
 #[derive(Debug, Clone)]
 enum RunState {
@@ -54,49 +56,10 @@ async fn main() {
         TimerState::new(options.duration)
     ));
 
-    // Create the curses app which handles the TUI and watches for key inputs.
-    let mut curses_app = cursive::default();
-
-    curses_app.load_toml(include_str!("theme.toml")).unwrap();
-    let bg_color = curses_app.current_theme().clone().palette[PaletteColor::Background];
-
-    // Create info bar content
-    let info_bar_items = vec![
-        InfoBarItem::new("s", "start timer"),
-        InfoBarItem::new("p", "pause toggle"),
-        InfoBarItem::new("r", "reset timer"),
-        InfoBarItem::new("q", "quit"),
-        InfoBarItem::new("↑↓", "add / sub time"),
-    ];
-    let info_bar_text = tui::info_bar_text(&info_bar_items);
-
-    // Create an info bar at the bottom of the app to display controls
-    curses_app.screen_mut().add_transparent_layer(
-        OnLayoutView::new(
-            FixedLayout::new().child(
-                Rect::from_point(Vec2::zero()),
-                Layer::new(TextView::new(info_bar_text))
-                    .full_width(),
-            ),
-            |layout, size| {
-                layout.set_child_position(
-                    0,
-                    Rect::from_size((0, size.y - 1), (size.x, 1)),
-                );
-                layout.layout(size);
-            },
-        ).full_screen(),
-    );
-
-    // Create a separate TextContent and add it to a TextView so we can keep a
-    // reference to it and update it without retrieving the TextView from the
-    // cursive app by name.
-    let timer_content = TextContent::new(duration_to_timer_string(&options.duration));
-    curses_app.add_layer(TextView::new_with_content(timer_content.clone())
-        .center()
-        .resized(SizeConstraint::Fixed(12), SizeConstraint::Fixed(3)));
-
-    curses_app.set_autorefresh(true);
+    // Create the curses app and receive the app, the default bg color and the
+    // reference to the TextContent for the timer.
+    // TODO: consider turning this tuple into a more coherent seeming struct
+    let (mut curses_app, bg_color, timer_content) = init_curses_app(&options);
 
     // Channel for sending messages to start / stop / pause / unpause the timer
     let (starter_send, mut starter_recv) = channel::<()>(16);
@@ -135,6 +98,7 @@ async fn main() {
     });
 
     // Callbacks to handle user input
+    // TODO: condsider extracting to tui module
     let timer_state_clone = timer_state.clone();
     let starter_send_clone = starter_send.clone();
     curses_app.add_global_callback('p', move |_| {
@@ -337,23 +301,6 @@ async fn recv_messages(mut receiver: Receiver<(i64, i64, i64)>, content: &TextCo
     while let Some((hours, minutes, seconds)) = receiver.recv().await {
         content.set_content(&hms_to_timer_string(hours, minutes, seconds));
     }
-}
-
-fn duration_to_hms(dur: &Duration) -> (i64, i64, i64) {
-    let hours = dur.num_hours() % 100;
-    let minutes = dur.num_minutes() % 60;
-    let seconds = dur.num_seconds() % 60;
-
-    (hours, minutes, seconds)
-}
-
-fn hms_to_timer_string(h: i64, m: i64, s:i64) -> String {
-    format!("{:02}:{:02}:{:02}", h, m, s)
-}
-
-fn duration_to_timer_string(dur: &Duration) -> String {
-    let (h, m, s) = duration_to_hms(dur);
-    hms_to_timer_string(h, m, s)
 }
 
 fn set_alert_bg(app: &mut Cursive) {
