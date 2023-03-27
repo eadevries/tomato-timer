@@ -32,7 +32,7 @@ pub fn info_bar_text(items: &[InfoBarItem]) -> SpannedString<Style> {
     };
 
     let mut info_bar_text = SpannedString::new();
-    if items.len() == 0 {
+    if items.is_empty() {
         return info_bar_text;
     } 
     

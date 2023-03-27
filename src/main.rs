@@ -85,7 +85,7 @@ async fn main() {
     if options.start {
         let mut ts = timer_state.lock().unwrap();
         let expiration = Utc::now() + options.duration;
-        (*ts).run_state = RunState::Running(RunningState { expiration, });
+        ts.run_state = RunState::Running(RunningState { expiration, });
 
         starter_send.send(()).await.unwrap();
     }
@@ -116,7 +116,7 @@ async fn main() {
                 },
                 _ => ts.run_state.clone(),
             };
-            (*ts).run_state = new_run_state;
+            ts.run_state = new_run_state;
         }
 
         let starter_send_clone = starter_send_clone.clone();
@@ -132,7 +132,7 @@ async fn main() {
     curses_app.add_global_callback('r', move |app| {
         let mut ts = timer_state_clone.lock().unwrap();
         if let RunState::Finished = ts.run_state {
-            (*ts).run_state = RunState::Unstarted;
+            ts.run_state = RunState::Unstarted;
 
             timer_content_clone.set_content(duration_to_timer_string(&ts.session_length));
 
@@ -156,7 +156,7 @@ async fn main() {
                 },
                 _ => ts.run_state.clone(),
             };
-            (*ts).run_state = new_run_state;
+            ts.run_state = new_run_state;
         }
 
         let starter_send_clone = starter_send_clone.clone();
@@ -176,7 +176,7 @@ async fn main() {
         match ts.run_state.clone() {
             // If the session has finished, we do nothing. User must reset the
             // timer.
-            RunState::Finished => return,
+            RunState::Finished => {},
             RunState::Paused(ps) => {
                 // In the Paused state, the arrows keys adjust the remaining
                 // time. The user can cause the session to finish by
@@ -185,13 +185,13 @@ async fn main() {
                 // running.
                 let dr = ps.duration_remaining + Duration::minutes(delta);
                 if dr <= Duration::zero() {
-                    (*ts).run_state = RunState::Finished;
+                    ts.run_state = RunState::Finished;
                     to_main_thread.send(Box::new(|app| {
                         set_alert_bg(app);
                     })).expect("to be able to send a callback to the main thread");
                     timer_content.set_content(duration_to_timer_string(&Duration::zero()));
                 } else {
-                    (*ts).run_state = RunState::Paused(PausedState { 
+                    ts.run_state = RunState::Paused(PausedState { 
                         duration_remaining: dr,
                     });
                     timer_content.set_content(duration_to_timer_string(&dr))
@@ -205,13 +205,13 @@ async fn main() {
                 if session_length <= Duration::zero() {
                     return;
                 }
-                (*ts).session_length = session_length; 
+                ts.session_length = session_length; 
                 timer_content.set_content(duration_to_timer_string(&session_length));
             },
             RunState::Running(rs) => {
                 // In the running state, we allow the arrow keys to add or
                 // subtract a minute off of the ticking clock.
-                (*ts).run_state = RunState::Running(RunningState { 
+                ts.run_state = RunState::Running(RunningState { 
                     expiration: rs.expiration + Duration::minutes(delta)
                     // We shouldn't need to check for putting the session into
                     // negative time, as the update thread checks for this,
@@ -236,10 +236,12 @@ async fn main() {
     curses_app.run();
 }
 
+type TUICallbackSender = CBSender<Box<dyn FnOnce(&mut Cursive) + Send + 'static>>;
+
 async fn send_updates(
     send: Sender<(i64, i64, i64)>,
     timer_state: Arc<Mutex<TimerState>>,
-    to_main_thread: &CBSender<Box<dyn FnOnce(&mut Cursive) + Send + 'static>>,
+    to_main_thread: &TUICallbackSender,
 ) {
     // To move into spawned thread, we cannot directly use the parameter, as it
     // will not outlast the function body.
@@ -271,7 +273,7 @@ async fn send_updates(
                 // to reacquire the mutex after leaving the block.
                 if timer_finished {
                     (hours, minutes, seconds) = (0, 0, 0);
-                    (*ts).run_state = RunState::Finished;
+                    ts.run_state = RunState::Finished;
                     to_main_thread.send(Box::new(|app| {
                         set_alert_bg(app)
                     })).expect("to be able to send a callback to the main thread");
@@ -279,7 +281,7 @@ async fn send_updates(
             }
 
             // Send the updated time remaining so that the TUI can be updated.
-            if let Err(_) = send.send((hours, minutes, seconds)).await {
+            if send.send((hours, minutes, seconds)).await.is_err() {
                 // If unable to send, the receiver has closed and we are
                 // shutting down.
                 break;
