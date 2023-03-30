@@ -11,6 +11,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tui::init_curses_app;
 use util::{duration_to_hms, duration_to_timer_string, hms_to_timer_string};
 
+mod audio;
 mod cli;
 mod tui;
 mod util;
@@ -189,6 +190,7 @@ async fn main() {
                 let dr = ps.duration_remaining + Duration::minutes(delta);
                 if dr <= Duration::zero() {
                     ts.run_state = RunState::Finished;
+                    audio::play_ding();
                     to_main_thread.send(Box::new(|app| {
                         set_alert_bg(app);
                     })).expect("to be able to send a callback to the main thread");
@@ -277,6 +279,7 @@ async fn send_updates(
                 if timer_finished {
                     (hours, minutes, seconds) = (0, 0, 0);
                     ts.run_state = RunState::Finished;
+                    audio::play_ding();
                     to_main_thread.send(Box::new(|app| {
                         set_alert_bg(app)
                     })).expect("to be able to send a callback to the main thread");
