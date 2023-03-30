@@ -3,13 +3,16 @@ use clap::{arg, command, value_parser};
 
 
 static MAIN_HELP_TEXT: &str = include_str!("./help_text/main.txt");
+static MUTED_HELP_TEXT: &str = include_str!("./help_text/muted.txt");
 static START_HELP_TEXT: &str = include_str!("./help_text/start.txt");
 
 static DEFAULT_SESSION_MILLIS: i64 = 1000 * 20;
 
+#[derive(Debug)]
 pub struct Options {
     pub start: bool,
     pub duration: Duration,
+    pub muted: bool,
 }
 
 impl Options {
@@ -17,6 +20,7 @@ impl Options {
         Options {
             start: true,
             duration: Duration::milliseconds(DEFAULT_SESSION_MILLIS),
+            muted: false,
         }
     }
 }
@@ -28,11 +32,15 @@ pub fn get_cli_options() -> Options {
         .arg(arg!(-d --duration <MINUTES> "Minutes for the timer to run")
              .value_parser(value_parser!(u32)))
         .arg(arg!(-s --start).help(START_HELP_TEXT))
+        .arg(arg!(-M --muted).help(MUTED_HELP_TEXT))
         .after_help(MAIN_HELP_TEXT)
         .get_matches();
 
+    // Flags
     options.start = matches.get_flag("start");
+    options.muted = matches.get_flag("muted");
 
+    // Other args
     if let Some(&minutes) = matches.get_one::<u32>("duration") {
         options.duration = Duration::minutes(minutes as i64);
     }

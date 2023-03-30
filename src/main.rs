@@ -36,14 +36,16 @@ struct PausedState {
 }
 
 struct TimerState {
+    muted: bool,
     session_length: Duration,
     run_state: RunState,
 }
 
 impl TimerState {
-    fn new(session_length: Duration) -> Self {
+    fn new(options: &cli::Options) -> Self {
         TimerState {
-            session_length,
+            muted: options.muted,
+            session_length: options.duration,
             run_state: RunState::Unstarted,
         }
     }
@@ -54,7 +56,7 @@ async fn main() {
     let options = cli::get_cli_options();
 
     let timer_state = Arc::new(Mutex::new(
-        TimerState::new(options.duration)
+        TimerState::new(&options)
     ));
 
     // Create the curses app and receive the app, the default bg color and the
@@ -87,7 +89,7 @@ async fn main() {
         { // Additional scope created to ensure std mutex is dropped before
           // the await call.
             let mut ts = timer_state.lock().unwrap();
-            let expiration = Utc::now() + options.duration;
+            let expiration = Utc::now() + ts.session_length;
             ts.run_state = RunState::Running(RunningState { expiration, });
         }
 
@@ -190,7 +192,9 @@ async fn main() {
                 let dr = ps.duration_remaining + Duration::minutes(delta);
                 if dr <= Duration::zero() {
                     ts.run_state = RunState::Finished;
-                    audio::play_ding();
+                    if !ts.muted {
+                        audio::play_ding();
+                    }
                     to_main_thread.send(Box::new(|app| {
                         set_alert_bg(app);
                     })).expect("to be able to send a callback to the main thread");
@@ -279,7 +283,9 @@ async fn send_updates(
                 if timer_finished {
                     (hours, minutes, seconds) = (0, 0, 0);
                     ts.run_state = RunState::Finished;
-                    audio::play_ding();
+                    if !ts.muted {
+                        audio::play_ding();
+                    }
                     to_main_thread.send(Box::new(|app| {
                         set_alert_bg(app)
                     })).expect("to be able to send a callback to the main thread");
