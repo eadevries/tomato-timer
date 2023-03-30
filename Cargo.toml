@@ -9,4 +9,5 @@ edition = "2021"
 chrono = { version = "0.4.24", features = ["default"] }
 clap = { version = "4.1.8", features = ["derive", "cargo"] }
 cursive = { version = "0.20.0", features = ["toml"] }
+rodio = "0.17.1"
 tokio = { version = "1.26.0", features = ["full"] }
