@@ -10,6 +10,7 @@ Current Features:
 - Can supply a duration in minutes using the `-d` / `--duration` arguments
 - Can set the timer to immediately start with the `-s` flag
 - Can mute audio notifications with the `-M` flag
+- Can have the timer play brown noise by supplying the `n` flag. (Currently too harsh and without volume control)
 - Can start the timer with the `s` hotkey
 - Can pause and resume the timer with the `p` hotkey
 - Can quit with the `q` hotkey

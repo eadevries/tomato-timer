@@ -8,6 +8,7 @@ use cursive::theme::{Color, PaletteColor};
 use cursive::views::TextContent;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
+use audio::{AudioPlayerCommand, start_audio_player};
 use tui::init_curses_app;
 use util::{duration_to_hms, duration_to_timer_string, hms_to_timer_string};
 
@@ -37,6 +38,7 @@ struct PausedState {
 
 struct TimerState {
     muted: bool,
+    noise: bool,
     session_length: Duration,
     run_state: RunState,
 }
@@ -45,6 +47,7 @@ impl TimerState {
     fn new(options: &cli::Options) -> Self {
         TimerState {
             muted: options.muted,
+            noise: options.noise,
             session_length: options.duration,
             run_state: RunState::Unstarted,
         }
@@ -68,6 +71,8 @@ async fn main() {
     let (starter_send, mut starter_recv) = channel::<()>(16);
     // Channel on which to send time updates only
     let (time_send, time_recv) = channel::<(i64, i64, i64)>(16);
+    // Channel for sending start/stop signals to the audio player thread
+    let (audio_send, audio_recv) = channel::<AudioPlayerCommand>(16);
     // Channel to send callbacks to cursive (main thread) from other threads
     let to_main_thread = curses_app.cb_sink().clone();
 
@@ -77,23 +82,44 @@ async fn main() {
     // updates and check for the session's ending.
     let timer_state_clone = timer_state.clone();
     let to_main_thread_clone = to_main_thread.clone();
+    let audio_send_clone = audio_send.clone();
     tokio::spawn(async move {
         while let Some(()) = starter_recv.recv().await {
-            send_updates(time_send.clone(), timer_state_clone.clone(), &to_main_thread_clone).await;             
+            send_updates(
+                time_send.clone(),
+                timer_state_clone.clone(),
+                audio_send_clone.clone(),
+                &to_main_thread_clone
+            ).await;             
         }
+    });
+
+    // We spawn the audio player thread as a blocking thread because rodio's
+    // audio sink is not `Send` and cannot be held across awaits; in preference
+    // to acquiring a new sync after every time we await a new message from the
+    // `audio_recv` channel, we use the blocking / synchronous version of the
+    // channel's `recv` method.
+    tokio::task::spawn_blocking(|| {
+        start_audio_player(audio_recv);
     });
 
     // If the `start` flag was passed, immediately update the timer_state to
     // running and send the message which will start up the time update thread.
     if options.start {
+        let noise;
         { // Additional scope created to ensure std mutex is dropped before
           // the await call.
             let mut ts = timer_state.lock().unwrap();
+            noise = ts.noise;
             let expiration = Utc::now() + ts.session_length;
             ts.run_state = RunState::Running(RunningState { expiration, });
         }
 
         starter_send.send(()).await.unwrap();
+        if noise {
+            audio_send.send(AudioPlayerCommand::Play).await
+                .expect("to be able to send the Play cmd to the newly created audio thread");
+        }
     }
 
     // Spawn the thread to recv the time updates and update the view.
@@ -106,16 +132,22 @@ async fn main() {
     // TODO: condsider extracting to tui module
     let timer_state_clone = timer_state.clone();
     let starter_send_clone = starter_send.clone();
+    let audio_send_clone = audio_send.clone();
     curses_app.add_global_callback('p', move |_| {
+        let mut audio_cmd = None;
+        let noise;
         {
             let mut ts = timer_state_clone.lock().unwrap();
+            noise = ts.noise;
             let new_run_state = match &ts.run_state {
                 RunState::Running(rs) => {
+                    audio_cmd = Some(AudioPlayerCommand::Pause);
                     RunState::Paused(PausedState {
                         duration_remaining: rs.expiration - Utc::now(),
                     })
                 },
                 RunState::Paused(ps) => {
+                    audio_cmd = Some(AudioPlayerCommand::Play);
                     RunState::Running(RunningState {
                         expiration: Utc::now() + ps.duration_remaining,
                     })
@@ -126,8 +158,12 @@ async fn main() {
         }
 
         let starter_send_clone = starter_send_clone.clone();
+        let audio_send_clone = audio_send_clone.clone();
         tokio::spawn(async move {
-            starter_send_clone.clone().send(()).await.unwrap();
+            if noise && audio_cmd.is_some() {
+                audio_send_clone.send(audio_cmd.unwrap()).await.unwrap();
+            }
+            starter_send_clone.send(()).await.unwrap();
         });
     });
 
@@ -151,11 +187,14 @@ async fn main() {
 
     let timer_state_clone = timer_state.clone();
     let starter_send_clone = starter_send.clone();
+    let audio_send_clone = audio_send.clone();
     curses_app.add_global_callback('s', move |_| { 
+        let mut play_audio = false;
         {
             let mut ts = timer_state_clone.lock().unwrap();
             let new_run_state = match &ts.run_state {
                 RunState::Unstarted => {
+                    play_audio = ts.noise;
                     RunState::Running(RunningState {
                         expiration: Utc::now() + ts.session_length,
                     })
@@ -166,7 +205,11 @@ async fn main() {
         }
 
         let starter_send_clone = starter_send_clone.clone();
+        let audio_send_clone = audio_send_clone.clone();
         tokio::spawn(async move {
+            if play_audio {
+                audio_send_clone.send(AudioPlayerCommand::Play).await.unwrap();
+            }
             starter_send_clone.send(()).await.unwrap();
         });
     });
@@ -248,8 +291,9 @@ async fn main() {
 type TUICallbackSender = CBSender<Box<dyn FnOnce(&mut Cursive) + Send + 'static>>;
 
 async fn send_updates(
-    send: Sender<(i64, i64, i64)>,
+    timer_send: Sender<(i64, i64, i64)>,
     timer_state: Arc<Mutex<TimerState>>,
+    audio_send: Sender<AudioPlayerCommand>,
     to_main_thread: &TUICallbackSender,
 ) {
     // To move into spawned thread, we cannot directly use the parameter, as it
@@ -265,9 +309,11 @@ async fn send_updates(
         // Loop until the timer_state is no longer RunState::Running, sending
         // regular time updates.
         loop {
+            let noise;
             { // additional block created to ensure that the mutex lock is 
               // dropped before the `await` when sending the time update.
                 let mut ts = timer_state.lock().unwrap();
+                noise = ts.noise;
                 if let RunState::Running(rs) = &ts.run_state {
                     let remaining_duration = rs.expiration - Utc::now();
                     timer_finished = remaining_duration.num_seconds() <= 0;
@@ -293,16 +339,19 @@ async fn send_updates(
             }
 
             // Send the updated time remaining so that the TUI can be updated.
-            if send.send((hours, minutes, seconds)).await.is_err() {
+            if timer_send.send((hours, minutes, seconds)).await.is_err() {
                 // If unable to send, the receiver has closed and we are
                 // shutting down.
                 break;
             }
 
             // If there is still time on the clock, sleep until the next 100ms
-            // has elapsed.
+            // has elapsed. Otherwise, if time is up and we are using brown
+            // noise, stop the audio player.
             if !timer_finished {
                 tokio::time::interval(Duration::milliseconds(100).to_std().unwrap());
+            } else if noise {
+                audio_send.send(AudioPlayerCommand::Pause).await.unwrap();
             }
         }
     });
