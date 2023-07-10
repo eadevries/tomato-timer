@@ -5,6 +5,7 @@ use clap::{arg, command, value_parser};
 static MAIN_HELP_TEXT: &str = include_str!("./help_text/main.txt");
 static MUTED_HELP_TEXT: &str = include_str!("./help_text/muted.txt");
 static START_HELP_TEXT: &str = include_str!("./help_text/start.txt");
+static BROWN_NOISE_HELP_TEXT: &str = include_str!("./help_text/noise.txt");
 
 static DEFAULT_SESSION_MILLIS: i64 = 1000 * 20;
 
@@ -13,6 +14,7 @@ pub struct Options {
     pub start: bool,
     pub duration: Duration,
     pub muted: bool,
+    pub noise: bool,
 }
 
 impl Options {
@@ -21,6 +23,7 @@ impl Options {
             start: true,
             duration: Duration::milliseconds(DEFAULT_SESSION_MILLIS),
             muted: false,
+            noise: false,
         }
     }
 }
@@ -33,12 +36,14 @@ pub fn get_cli_options() -> Options {
              .value_parser(value_parser!(u32)))
         .arg(arg!(-s --start).help(START_HELP_TEXT))
         .arg(arg!(-M --muted).help(MUTED_HELP_TEXT))
+        .arg(arg!(-n --"brown-noise").help(BROWN_NOISE_HELP_TEXT))
         .after_help(MAIN_HELP_TEXT)
         .get_matches();
 
     // Flags
     options.start = matches.get_flag("start");
     options.muted = matches.get_flag("muted");
+    options.noise = matches.get_flag("brown-noise");
 
     // Other args
     if let Some(&minutes) = matches.get_one::<u32>("duration") {

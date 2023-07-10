@@ -1,0 +1,1 @@
+Play brown noise when timer is running. (Currently rather harsh sounding.)
