@@ -1,19 +1,17 @@
-use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader,Cursor};
 use std::time::Duration;
 
 use rodio::{Decoder, OutputStream};
 use rodio::source::Source;
 
 
-static DING_AUDIO_FILE_PATH: &str = "audio/elevator-ding.wav";
-
 pub fn play_ding() {
     tokio::spawn(async {
         let (_stream, stream_handle) = OutputStream::try_default().unwrap();
 
-        let audio_file = BufReader::new(File::open(DING_AUDIO_FILE_PATH).unwrap());
-        let source = Decoder::new(audio_file).unwrap();
+        let audio_bytes = std::include_bytes!("../audio/elevator-ding.wav");
+        let audio_buf = BufReader::new(Cursor::new(audio_bytes));
+        let source = Decoder::new(audio_buf).unwrap();
 
         let audio_duration = if let Some(float_millis) = source.total_duration() {
             float_millis.as_millis() as u64
